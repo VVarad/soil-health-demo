@@ -1,0 +1,30 @@
+{
+  "fields": 2078,
+  "villages": 273,
+  "targets": {
+    "S": {
+      "r2": 0.69,
+      "r2_satellite_only": 0.48,
+      "status_accuracy": 0.762,
+      "baseline_accuracy": 0.645,
+      "deficient_share": 0.355,
+      "cutoff": 10.0
+    },
+    "Zn": {
+      "r2": 0.41,
+      "r2_satellite_only": 0.24,
+      "status_accuracy": 0.802,
+      "baseline_accuracy": 0.558,
+      "deficient_share": 0.558,
+      "cutoff": 0.6
+    },
+    "Fe": {
+      "r2": 0.19,
+      "r2_satellite_only": 0.11,
+      "status_accuracy": 0.673,
+      "baseline_accuracy": 0.511,
+      "deficient_share": 0.489,
+      "cutoff": 4.5
+    }
+  }
+}
