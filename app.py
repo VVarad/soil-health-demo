@@ -31,8 +31,6 @@ h1 {font-weight: 700; letter-spacing: -0.5px;}
        padding: 18px 20px; height: 100%;}
 .card-title {font-size: 0.85rem; font-weight: 600; color: #5B6660;
              text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px;}
-.big {font-size: 2.1rem; font-weight: 700; color: #1F2A24; line-height: 1.15;}
-.unit {font-size: 1rem; font-weight: 500; color: #5B6660;}
 .row {display: flex; justify-content: space-between; align-items: center;
       margin-top: 10px; font-size: 0.95rem; color: #3A4540;}
 .pill {display: inline-block; padding: 2px 10px; border-radius: 999px;
@@ -44,6 +42,9 @@ h1 {font-weight: 700; letter-spacing: -0.5px;}
 .kv {display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;}
 .kv div span {display: block; font-size: 0.8rem; color: #5B6660;}
 .kv div b {font-size: 1.15rem; color: #1F2A24;}
+.hero {display: inline-block; padding: 6px 20px; border-radius: 999px;
+       font-size: 1.45rem; font-weight: 700; margin: 4px 0 6px;}
+.small {font-size: 0.9rem; color: #5B6660;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -74,12 +75,13 @@ def pill(t, v):
 
 
 def result_card(t, pred, lab=None):
+    # The status is the headline, the numbers are secondary
     html = (f'<div class="card"><div class="card-title">{NAMES[t]} ({t})</div>'
-            f'<div class="big">{pred:.2f} <span class="unit">mg/kg</span></div>'
-            f'<div class="row"><span>Estimated status</span>{pill(t, pred)}</div>')
+            f'<div class="hero {"def" if status(t, pred) == "Deficient" else "ok"}">{status(t, pred)}</div>'
+            f'<div class="small">Estimated {pred:.2f} mg/kg</div>')
     if lab is not None:
         agree = status(t, pred) == status(t, lab)
-        html += (f'<div class="row"><span>Lab measured: <b>{lab:.2f}</b> mg/kg</span>{pill(t, lab)}</div>'
+        html += (f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span>{pill(t, lab)}</div>'
                  f'<div class="note">{"Status agrees with the lab" if agree else "Status differs from the lab"}'
                  f' &middot; deficient below {TARGETS[t]:g} mg/kg</div>')
     else:
@@ -95,8 +97,6 @@ df, metrics, models = load_fields(), load_metrics(), load_models()
 
 # ---------------- header & field picker ----------------
 st.title("Micronutrient Estimator")
-st.markdown("Estimates **sulphur, zinc and iron** for farm fields in **Kolhapur and Sangli** "
-            "from a basic soil test and satellite data. Lab values: Soil Health Card programme, 2023-24.")
 
 with st.sidebar:
     st.subheader("Select a field")
@@ -139,8 +139,6 @@ with tab_check:
     for col, t in zip(st.columns(3, gap="medium"), TARGETS):
         with col:
             result_card(t, field[f"pred_{t}"], field[t])
-    st.caption("These estimates come from a model that never saw this village during training, "
-               "so the comparison with the lab value is a fair test.")
 
 # ---------------- Try your own values ----------------
 with tab_custom:
@@ -160,25 +158,19 @@ with tab_custom:
     for col, t in zip(st.columns(3, gap="medium"), TARGETS):
         with col:
             result_card(t, float(models[t].predict(X)[0]))
-    st.caption("Values outside the range seen in Kolhapur and Sangli are not allowed, "
-               "because the model cannot be trusted there.")
 
 # ---------------- Model accuracy ----------------
 with tab_acc:
     st.subheader("How accurate is it?")
-    st.markdown("Tested on all fields, each predicted by a model that **never saw its village**. "
-                "Status means Deficient or Sufficient.")
     m = metrics["targets"]
     table = pd.DataFrame({
         "Nutrient": [f"{NAMES[t]} ({t})" for t in TARGETS],
         "Status correct": [f"{m[t]['status_accuracy']:.0%}" for t in TARGETS],
-        "Guessing the common answer": [f"{m[t]['baseline_accuracy']:.0%}" for t in TARGETS],
+        "Rule-based": [f"{m[t]['baseline_accuracy']:.0%}" for t in TARGETS],
         "R² with basic test + satellite": [f"{m[t]['r2']:.2f}" for t in TARGETS],
         "R² satellite only": [f"{m[t]['r2_satellite_only']:.2f}" for t in TARGETS],
     })
-    st.dataframe(table, hide_index=True, use_container_width=True)
-    st.markdown("Zinc and sulphur are clearly better than guessing; iron is weaker. "
-                "Adding the basic soil test improves every nutrient compared with satellite data alone.")
+    st.dataframe(table, hide_index=True, width="stretch")
 
     st.subheader("Map of deficiency")
     c1, c2 = st.columns(2)
