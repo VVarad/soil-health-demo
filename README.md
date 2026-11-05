@@ -83,7 +83,7 @@ models/               original RF regressors and CatBoost models for the five vi
 
 ## Limitations
 
-- Covers one season (2023-24) and two districts only. It has not been tested elsewhere.
+- Covers one season and two districts only. It has not been tested elsewhere.
 - Sample coordinates come from the Soil Health Card portal. Several samples in a village often share one
   location, so estimates are per sample point, not per surveyed field.
 - Copper, manganese and boron are not modelled, because almost no samples are deficient in them.
