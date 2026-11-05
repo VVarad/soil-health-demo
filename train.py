@@ -1,21 +1,8 @@
-"""
-Train the micronutrient models (S, Zn, Fe) for Kolhapur and Sangli.
-
-Inputs per field: basic soil test (N, P, K, OC, pH, EC) + satellite/soil-map features.
-Outputs written for the app:
-  data/fields.csv     one row per field: location, inputs, lab S/Zn/Fe, honest predictions
-  models/<nutr>.joblib  final models trained on all fields (used for custom input)
-  data/metrics.json   accuracy summary
-
-"Honest predictions" are out-of-fold: each field is predicted by a model that never saw
-its village (5-fold GroupKFold by village).
-
-Needs the raw Soil Health Card data from the upstream project:
-  python train.py --shc ../Soil-Health-Mapping-PanIndia/shc_data/AEZS/AGRI_2023-24
-"""
 import argparse
 import json
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import joblib
 import numpy as np
@@ -29,7 +16,7 @@ SATELLITE = ['temp', 'SI', 'precipitation', 'sand05', 'silt05', 'sand515', 'TGSI
              'NIRv_Kharif', 'NIRv_Rabi', 'NIRv_Zaid']
 BASIC_TEST = ['N', 'P', 'K', 'OC', 'pH', 'EC']
 FEATURES = SATELLITE + BASIC_TEST
-# Soil Health Card critical limits (mg/kg): below = deficient
+
 TARGETS = {'S': 10.0, 'Zn': 0.6, 'Fe': 4.5}
 
 
@@ -38,7 +25,7 @@ def rf():
                                  max_features=0.6, random_state=42, n_jobs=-1)
 
 
-def main(shc_dir):
+def rebuild_regressors(shc_dir, output):
     d = pd.concat([pd.read_csv(os.path.join(shc_dir, f)) for f in ["AEZ_6.csv", "AEZ_19.csv"]])
     d = d[d["district"].str.upper().isin(["KOLHAPUR", "SANGLI"])].copy()
     d["district"] = d["district"].str.title()
@@ -50,7 +37,6 @@ def main(shc_dir):
     groups = d["district"] + "|" + d["village"]
     print(f"{len(d)} fields, {groups.nunique()} villages")
 
-    os.makedirs("models", exist_ok=True)
     metrics = {}
     for t, cut in TARGETS.items():
         cv = GroupKFold(n_splits=5)
@@ -65,17 +51,40 @@ def main(shc_dir):
             "deficient_share": round(float(lab_def.mean()), 3),
             "cutoff": cut,
         }
-        joblib.dump(rf().fit(d[FEATURES], d[t]), f"models/{t}.joblib", compress=3)
+        joblib.dump(rf().fit(d[FEATURES], d[t]), output / "models" / f"{t}.joblib", compress=3)
         print(t, metrics[t])
 
     cols = ["district", "village", "latitude", "longitude"] + FEATURES + list(TARGETS) + \
            [f"pred_{t}" for t in TARGETS]
-    d[cols].round(5).to_csv("data/fields.csv", index=False)
-    json.dump({"fields": len(d), "villages": int(groups.nunique()), "targets": metrics},
-              open("data/metrics.json", "w"), indent=2)
+    data = d[cols].round(5).copy()
+    return data, {"fields": len(d), "villages": int(groups.nunique()), "targets": metrics}
+
+
+def main(shc_dir, jobs=4):
+    from classifier_study import train_classifiers
+
+    root = Path(__file__).resolve().parent
+    # Complete training in a staging directory before replacing any serving files.
+    with TemporaryDirectory(dir=root) as tmp:
+        staging = Path(tmp)
+        (staging / "models").mkdir()
+        (staging / "data").mkdir()
+        if shc_dir is not None:
+            data, metrics = rebuild_regressors(shc_dir, staging)
+        else:
+            data = pd.read_csv(root / "data/fields.csv")
+            metrics = json.loads((root / "data/metrics.json").read_text())
+        train_classifiers(data, FEATURES, TARGETS, metrics, staging, jobs)
+        data.to_csv(staging / "data/fields.csv", index=False)
+        (staging / "data/metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+        for artifact in staging.glob("*/*"):
+            artifact.replace(root / artifact.relative_to(staging))
+
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--shc", default="../Soil-Health-Mapping-PanIndia/shc_data/AEZS/AGRI_2023-24")
-    main(ap.parse_args().shc)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--shc", type=Path, help="Also rebuild the RF regressors from the original raw SHC CSVs.")
+    parser.add_argument("--jobs", type=int, default=4, help="Parallel evaluation folds.")
+    args = parser.parse_args()
+    main(args.shc.resolve() if args.shc else None, args.jobs)

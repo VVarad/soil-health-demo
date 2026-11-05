@@ -8,12 +8,17 @@ Run:  streamlit run app.py
 """
 import json
 
-import joblib
+from pathlib import Path
+
+from catboost import CatBoostClassifier
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
+from classifier_study import catboost_path
 from train import BASIC_TEST, FEATURES, TARGETS
+
+ROOT = Path(__file__).resolve().parent
 
 NAMES = {"S": "Sulphur", "Zn": "Zinc", "Fe": "Iron"}
 BASIC_LABELS = {"N": ("Nitrogen", "kg/ha"), "P": ("Phosphorus", "kg/ha"),
@@ -51,18 +56,23 @@ h1 {font-weight: 700; letter-spacing: -0.5px;}
 
 @st.cache_data
 def load_fields():
-    return pd.read_csv("data/fields.csv")
+    return pd.read_csv(ROOT / "data/fields.csv")
 
 
 @st.cache_data
 def load_metrics():
-    with open("data/metrics.json") as f:
+    with open(ROOT / "data/metrics.json") as f:
         return json.load(f)
 
 
 @st.cache_resource
-def load_models():
-    return {t: joblib.load(f"models/{t}.joblib") for t in TARGETS}
+def load_models(fold):
+    models = {}
+    for target in TARGETS:
+        model = CatBoostClassifier()
+        model.load_model(str(catboost_path(ROOT, fold, target)))
+        models[target] = model
+    return models
 
 
 def status(t, v):
@@ -74,13 +84,14 @@ def pill(t, v):
     return f'<span class="pill {"def" if s == "Deficient" else "ok"}">{s}</span>'
 
 
-def result_card(t, pred, lab=None):
+def result_card(t, score, lab=None):
+    prediction = "Deficient" if score > 0.5 else "Sufficient"
     # The status is the headline, the numbers are secondary
     html = (f'<div class="card"><div class="card-title">{NAMES[t]} ({t})</div>'
-            f'<div class="hero {"def" if status(t, pred) == "Deficient" else "ok"}">{status(t, pred)}</div>'
-            f'<div class="small">Estimated {pred:.2f} mg/kg</div>')
+            f'<div class="hero {"def" if prediction == "Deficient" else "ok"}">{prediction}</div>'
+            f'<div class="small">CatBoost deficiency score: {score:.1%}</div>')
     if lab is not None:
-        agree = status(t, pred) == status(t, lab)
+        agree = prediction == status(t, lab)
         html += (f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span>{pill(t, lab)}</div>'
                  f'<div class="note">{"Status agrees with the lab" if agree else "Status differs from the lab"}'
                  f' &middot; deficient below {TARGETS[t]:g} mg/kg</div>')
@@ -93,7 +104,7 @@ def fmt(k, v):
     return f"{v:.2f}" if k in ("OC", "pH", "EC") else f"{v:.0f}"
 
 
-df, metrics, models = load_fields(), load_metrics(), load_models()
+df, metrics = load_fields(), load_metrics()
 
 # ---------------- header & field picker ----------------
 st.title("Micronutrient Estimator")
@@ -138,13 +149,19 @@ with tab_check:
     st.subheader("Estimated micronutrients")
     for col, t in zip(st.columns(3, gap="medium"), TARGETS):
         with col:
-            result_card(t, field[f"pred_{t}"], field[t])
+            result_card(t, field[f"catboost_score_{t}"], field[t])
 
 # ---------------- Try your own values ----------------
 with tab_custom:
     st.subheader("Enter basic soil test values")
     st.caption(f"Satellite data is taken from the selected location: {village}, {district}. "
                "Change any value to see the estimate update.")
+    field_key = (district, village, i)
+    if st.session_state.get("selected_field") != field_key:
+        for key in BASIC_TEST:
+            st.session_state.pop(f"in_{key}", None)
+        st.session_state["selected_field"] = field_key
+    models = load_models(int(field["village_fold"]))
     x = field[FEATURES].astype(float).copy()
     cols = st.columns(3, gap="medium")
     steps = {"N": 10.0, "P": 5.0, "K": 10.0, "OC": 0.05, "pH": 0.1, "EC": 0.05}
@@ -157,36 +174,54 @@ with tab_custom:
     X = pd.DataFrame([x])[FEATURES]
     for col, t in zip(st.columns(3, gap="medium"), TARGETS):
         with col:
-            result_card(t, float(models[t].predict(X)[0]))
+            result_card(t, float(models[t].predict_proba(X, thread_count=1)[0, 1]))
 
 # ---------------- Model accuracy ----------------
 with tab_acc:
     st.subheader("How accurate is it?")
     m = metrics["targets"]
-    table = pd.DataFrame({
-        "Nutrient": [f"{NAMES[t]} ({t})" for t in TARGETS],
-        "Status correct": [f"{m[t]['status_accuracy']:.0%}" for t in TARGETS],
-        "Rule-based": [f"{m[t]['baseline_accuracy']:.0%}" for t in TARGETS],
-        "R² with basic test + satellite": [f"{m[t]['r2']:.2f}" for t in TARGETS],
-        "R² satellite only": [f"{m[t]['r2_satellite_only']:.2f}" for t in TARGETS],
-    })
+    methods = {
+        "RF Regressor + cutoff": "status_accuracy",
+        "Tuned RF Classifier": "tuned_rf_accuracy",
+        "CatBoost Classifier": "catboost_accuracy",
+    }
+    table = pd.DataFrame([
+        {"Method": name, **{NAMES[t]: f"{m[t][key]:.2%}" for t in TARGETS}}
+        for name, key in methods.items()
+    ])
     st.dataframe(table, hide_index=True, width="stretch")
+    st.caption("Deficiency classification accuracy on five village-held-out folds. "
+               "CatBoost supplies the status shown throughout the dashboard.")
+    with st.expander("Rule-based baseline and RF regression scores"):
+        diagnostics = pd.DataFrame({
+            "Nutrient": [NAMES[t] for t in TARGETS],
+            "Majority-class accuracy": [f"{m[t]['baseline_accuracy']:.1%}" for t in TARGETS],
+            "RF R² with basic test + satellite": [m[t]["r2"] for t in TARGETS],
+            "RF R² satellite only": [m[t]["r2_satellite_only"] for t in TARGETS],
+        })
+        st.dataframe(diagnostics, hide_index=True, width="stretch")
 
     st.subheader("Map of deficiency")
     c1, c2 = st.columns(2)
     t = c1.radio("Nutrient", list(TARGETS), format_func=lambda k: NAMES[k], horizontal=True)
-    src = c2.radio("Show", ["Lab measured", "Estimated"], horizontal=True)
-    col = t if src == "Lab measured" else f"pred_{t}"
-    mp = df[["village", "latitude", "longitude", col]].copy()
-    mp["color"] = mp[col].map(lambda v: (DEFICIENT_RGB if v < TARGETS[t] else SUFFICIENT_RGB) + [190])
-    mp["value"] = mp[col].round(2)
+    src = c2.radio("Show", ["Lab measured", "Estimated"], index=1, horizontal=True)
+    mp = df[["village", "latitude", "longitude"]].copy()
+    if src == "Lab measured":
+        deficient = df[t] < TARGETS[t]
+        mp["detail"] = df[t].map(lambda value: f"Lab measured: {value:.2f} mg/kg")
+    else:
+        score = df[f"catboost_score_{t}"]
+        deficient = score > 0.5
+        mp["detail"] = score.map(lambda value: f"CatBoost deficiency score: {value:.1%}")
+    mp["status"] = deficient.map({True: "Deficient", False: "Sufficient"})
+    mp["color"] = deficient.map(lambda flag: (DEFICIENT_RGB if flag else SUFFICIENT_RGB) + [190])
     st.pydeck_chart(pdk.Deck(
         map_style="light",
         initial_view_state=pdk.ViewState(latitude=df.latitude.mean(), longitude=df.longitude.mean(), zoom=7.8),
         layers=[pdk.Layer("ScatterplotLayer", mp, get_position="[longitude, latitude]",
                           get_fill_color="color", get_radius=1000, pickable=True)],
-        tooltip={"text": "{village}\n{value} mg/kg"}), height=430)
-    share = (mp[col] < TARGETS[t]).mean()
+        tooltip={"text": "{village}\n{status}\n{detail}"}), height=430)
+    share = deficient.mean()
     st.markdown(f'<span class="pill def">Deficient</span> {share:.0%} of fields &nbsp;&nbsp; '
                 f'<span class="pill ok">Sufficient</span> {1 - share:.0%} of fields',
                 unsafe_allow_html=True)

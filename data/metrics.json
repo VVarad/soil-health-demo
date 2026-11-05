@@ -5,26 +5,32 @@
     "S": {
       "r2": 0.69,
       "r2_satellite_only": 0.48,
-      "status_accuracy": 0.762,
+      "status_accuracy": 0.7617901828681425,
       "baseline_accuracy": 0.645,
       "deficient_share": 0.355,
-      "cutoff": 10.0
+      "cutoff": 10.0,
+      "tuned_rf_accuracy": 0.8301251203079885,
+      "catboost_accuracy": 0.8310875842155919
     },
     "Zn": {
       "r2": 0.41,
       "r2_satellite_only": 0.24,
-      "status_accuracy": 0.802,
+      "status_accuracy": 0.802213666987488,
       "baseline_accuracy": 0.558,
       "deficient_share": 0.558,
-      "cutoff": 0.6
+      "cutoff": 0.6,
+      "tuned_rf_accuracy": 0.8123195380173244,
+      "catboost_accuracy": 0.8079884504331087
     },
     "Fe": {
       "r2": 0.19,
       "r2_satellite_only": 0.11,
-      "status_accuracy": 0.673,
+      "status_accuracy": 0.6727622714148219,
       "baseline_accuracy": 0.511,
       "deficient_share": 0.489,
-      "cutoff": 4.5
+      "cutoff": 4.5,
+      "tuned_rf_accuracy": 0.6963426371511068,
+      "catboost_accuracy": 0.7001924927815207
     }
   }
 }

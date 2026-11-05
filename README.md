@@ -12,14 +12,13 @@ and uses the answer to flag which samples most need a full micronutrient test.
 All results come from village-held-out testing: each sample is predicted by a model that never saw its village.
 The data is 2,078 Soil Health Card samples from 273 villages (2023-24).
 
-| Nutrient | Deficient below | Status correct | Rule-based baseline | R² (basic test + satellite) | R² (satellite only) |
-| --- | --- | --- | --- | --- | --- |
-| Sulphur (S) | 10 mg/kg | 76% | 64% | 0.69 | 0.48 |
-| Zinc (Zn) | 0.6 mg/kg | 80% | 56% | 0.41 | 0.24 |
-| Iron (Fe) | 4.5 mg/kg | 67% | 51% | 0.19 | 0.11 |
+| Model | Sulphur | Zinc | Iron |
+| --- | ---: | ---: | ---: |
+| RF Regressor + cutoff | 76.18% | 80.22% | 67.28% |
+| Tuned RF Classifier | 83.01% | 81.23% | 69.63% |
+| CatBoost Classifier | 83.11% | 80.80% | 70.02% |
 
-The **rule-based baseline** gives every sample the most common status. The model beats it for all three
-nutrients. Zinc and sulphur are useful for screening; iron is not yet reliable.
+These are deficiency classification accuracies. Lab readings below 10 mg/kg for S, 0.6 mg/kg for Zn and 4.5 mg/kg for Fe count as deficient. The Model accuracy tab also reports the majority-class baseline and the original RF regression R² scores.
 
 ## The app
 
@@ -37,47 +36,49 @@ The Streamlit dashboard has three tabs:
    - Remote sensing: seasonal NDVI and NIRv for Kharif, Rabi and Zaid, plus salinity (SI) and
      grain-size (TGSI) indices, all from Landsat 8/9. Also land-surface temperature (MODIS),
      rainfall (CHIRPS), and sand, silt and pH maps (SoilGrids).
-2. **Model**: one random forest per nutrient, with 200 trees.
-3. **Validation**: 5-fold cross-validation grouped by village, so no village appears in both training and testing.
-4. **Status**: the estimated concentration (mg/kg) is compared with the Soil Health Card critical limit.
+2. **Predictions**: A binary CatBoost classifier per nutrient estimates the deficiency score from 21 inputs. Scores above 0.5 indicate deficient. Cards show the CatBoost score as a percentage. Lab measurements are in mg/kg.
+3. **Validation**: Five folds hold entire villages out of training. Field check and the Estimated map use the saved out-of-fold CatBoost scores. Custom values use the CatBoost models that held out the selected village, so the original inputs reproduce that field's scores. Editing a field's inputs does not alter the saved field or map.
+4. **Comparison**: The original RF regressor predicts concentrations and applies the lab cutoffs. The tuned RF classifier predicts status directly. Eight RF settings compete on three grouped folds inside each outer training split. CatBoost uses 400 iterations, depth 5, and a learning rate of 0.05.
 
 N, P and K are in kg/ha and micronutrients in mg/kg. These are the units the Soil Health Card itself uses.
 
 ## Run locally
 
-Requires Python 3.12 or newer.
+Tested with Python 3.12. Extract the ZIP, open the directory containing `app.py`, and run:
 
 ```bash
-git clone https://github.com/VVarad/soil-health-demo.git
-cd soil-health-demo
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-streamlit run app.py
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-Then open http://localhost:8501.
+For the existing Streamlit deployment, copy the **contents** of this project folder into the current app directory in the connected repository. Commit the updated source, requirements, data and all model files. Keep its existing entry point targeting `app.py`. The packaged models are ready for inference on first launch.
 
-## Retrain the models (optional)
+## Rebuild the models (optional)
 
-The repository already includes the processed data and trained models. To rebuild them you need the raw
-agro-ecological-zone CSVs (`AEZ_6.csv` and `AEZ_19.csv`) from the data source below:
+From the project root, regenerate the classifiers, held-out scores and comparison with the included data:
 
 ```bash
-python train.py --shc path/to/shc_data/AEZS/AGRI_2023-24
+python train.py --jobs 4
 ```
 
-This rewrites `data/fields.csv`, `data/metrics.json` and `models/*.joblib`.
+To rebuild the original RF concentration models and satellite-only regression benchmarks first, supply the original raw `AEZ_6.csv` and `AEZ_19.csv`:
+
+```bash
+python train.py --shc path/to/shc_data/AEZS/AGRI_2023-24 --jobs 4
+```
 
 ## Project structure
 
 ```
-app.py               Streamlit dashboard
-train.py             data preparation, training and evaluation
-data/fields.csv      one row per sample: location, inputs, lab values, out-of-fold estimates
-data/metrics.json    accuracy summary shown in the app
-models/              trained random forests for S, Zn and Fe
-.streamlit/          app theme
+app.py                Streamlit dashboard
+train.py              original data preparation and training entry point
+classifier_study.py   grouped CatBoost training and nested RF evaluation
+data/fields.csv       inputs, lab values, RF estimates, village folds and CatBoost scores
+data/metrics.json     model comparison and RF diagnostics
+models/               original RF regressors and CatBoost models for the five village folds
+.streamlit/           app theme
 ```
 
 ## Limitations
