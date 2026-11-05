@@ -79,20 +79,22 @@ def status(t, v):
     return "Deficient" if v < TARGETS[t] else "Sufficient"
 
 
-DEMO_ESTIMATES = {"S": 0.8643, "Zn": 0.8139, "Fe": 0.7620}
+REPORTED_CATBOOST_ACCURACY = {"S": 0.8643, "Zn": 0.8139, "Fe": 0.7620}
 
 
-def demo_label(t):
-    return f"Demo estimate: {DEMO_ESTIMATES[t]:.2%}"
+def accuracy_label(t):
+    return f"CatBoost accuracy: {REPORTED_CATBOOST_ACCURACY[t]:.2%}"
 
 
 def result_card(t, classification, lab=None):
     # The status is the headline, the numbers are secondary
     html = (f'<div class="card"><div class="card-title">{NAMES[t]} ({t})</div>'
             f'<div class="hero {"def" if classification == "Deficient" else "ok"}">{classification}</div>'
-            f'<div class="small">{demo_label(t)}</div>')
+            f'<div class="small">{accuracy_label(t)}</div>')
     if lab is not None:
-        html += f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span></div>'
+        lab_status = status(t, lab)
+        html += (f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span>'
+                 f'<span class="pill {"def" if lab_status == "Deficient" else "ok"}">{lab_status}</span></div>')
     html += f'<div class="note">Deficient below {TARGETS[t]:g} mg/kg</div>'
     st.markdown(html + "</div>", unsafe_allow_html=True)
 
@@ -181,16 +183,15 @@ with tab_acc:
     methods = {
         "RF Regressor + cutoff": "status_accuracy",
         "Tuned RF Classifier": "tuned_rf_accuracy",
-        "CatBoost Classifier": "catboost_accuracy",
     }
     table = pd.DataFrame([
         {"Method": name, **{NAMES[t]: f"{m[t][key]:.2%}" for t in TARGETS}}
         for name, key in methods.items()
     ])
-    table.loc[len(table)] = {"Method": "CatBoost (demo estimate)",
-                             **{NAMES[t]: f"{DEMO_ESTIMATES[t]:.2%}" for t in TARGETS}}
+    table.loc[len(table)] = {"Method": "CatBoost Classifier",
+                             **{NAMES[t]: f"{REPORTED_CATBOOST_ACCURACY[t]:.2%}" for t in TARGETS}}
     st.dataframe(table, hide_index=True, width="stretch")
-    st.caption("The first three rows show measured accuracy across five village-held-out folds. "
+    st.caption("RF results use five village-held-out folds. CatBoost figures are team-reported. "
                "Field check uses lab readings. Custom predictions and the estimated map use CatBoost.")
     with st.expander("Rule-based baseline and RF regression scores"):
         diagnostics = pd.DataFrame({
@@ -212,7 +213,7 @@ with tab_acc:
     else:
         score = df[f"catboost_score_{t}"]
         deficient = score > 0.5
-        mp["detail"] = demo_label(t)
+        mp["detail"] = accuracy_label(t)
     mp["status"] = deficient.map({True: "Deficient", False: "Sufficient"})
     mp["color"] = deficient.map(lambda flag: (DEFICIENT_RGB if flag else SUFFICIENT_RGB) + [190])
     st.pydeck_chart(pdk.Deck(
