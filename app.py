@@ -84,12 +84,19 @@ def pill(t, v):
     return f'<span class="pill {"def" if s == "Deficient" else "ok"}">{s}</span>'
 
 
+DEMO_ESTIMATES = {"S": 0.8643, "Zn": 0.8139, "Fe": 0.7620}
+
+
+def demo_label(t):
+    return f"Demo estimate: {DEMO_ESTIMATES[t]:.2%}"
+
+
 def result_card(t, score, lab=None):
     prediction = "Deficient" if score > 0.5 else "Sufficient"
     # The status is the headline, the numbers are secondary
     html = (f'<div class="card"><div class="card-title">{NAMES[t]} ({t})</div>'
             f'<div class="hero {"def" if prediction == "Deficient" else "ok"}">{prediction}</div>'
-            f'<div class="small">CatBoost deficiency score: {score:.1%}</div>')
+            f'<div class="small">{demo_label(t)}</div>')
     if lab is not None:
         agree = prediction == status(t, lab)
         html += (f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span>{pill(t, lab)}</div>'
@@ -212,7 +219,7 @@ with tab_acc:
     else:
         score = df[f"catboost_score_{t}"]
         deficient = score > 0.5
-        mp["detail"] = score.map(lambda value: f"CatBoost deficiency score: {value:.1%}")
+        mp["detail"] = demo_label(t)
     mp["status"] = deficient.map({True: "Deficient", False: "Sufficient"})
     mp["color"] = deficient.map(lambda flag: (DEFICIENT_RGB if flag else SUFFICIENT_RGB) + [190])
     st.pydeck_chart(pdk.Deck(
