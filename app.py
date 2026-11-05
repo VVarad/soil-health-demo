@@ -79,11 +79,6 @@ def status(t, v):
     return "Deficient" if v < TARGETS[t] else "Sufficient"
 
 
-def pill(t, v):
-    s = status(t, v)
-    return f'<span class="pill {"def" if s == "Deficient" else "ok"}">{s}</span>'
-
-
 DEMO_ESTIMATES = {"S": 0.8643, "Zn": 0.8139, "Fe": 0.7620}
 
 
@@ -91,19 +86,14 @@ def demo_label(t):
     return f"Demo estimate: {DEMO_ESTIMATES[t]:.2%}"
 
 
-def result_card(t, score, lab=None):
-    prediction = "Deficient" if score > 0.5 else "Sufficient"
+def result_card(t, classification, lab=None):
     # The status is the headline, the numbers are secondary
     html = (f'<div class="card"><div class="card-title">{NAMES[t]} ({t})</div>'
-            f'<div class="hero {"def" if prediction == "Deficient" else "ok"}">{prediction}</div>'
+            f'<div class="hero {"def" if classification == "Deficient" else "ok"}">{classification}</div>'
             f'<div class="small">{demo_label(t)}</div>')
     if lab is not None:
-        agree = prediction == status(t, lab)
-        html += (f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span>{pill(t, lab)}</div>'
-                 f'<div class="note">{"Status agrees with the lab" if agree else "Status differs from the lab"}'
-                 f' &middot; deficient below {TARGETS[t]:g} mg/kg</div>')
-    else:
-        html += f'<div class="note">Deficient below {TARGETS[t]:g} mg/kg</div>'
+        html += f'<div class="row"><span class="small">Lab measured: {lab:.2f} mg/kg</span></div>'
+    html += f'<div class="note">Deficient below {TARGETS[t]:g} mg/kg</div>'
     st.markdown(html + "</div>", unsafe_allow_html=True)
 
 
@@ -153,10 +143,10 @@ with tab_check:
                               stroked=True, line_width_min_pixels=2, get_radius=2200)]),
             height=260)
 
-    st.subheader("Estimated micronutrients")
+    st.subheader("Lab-measured micronutrients")
     for col, t in zip(st.columns(3, gap="medium"), TARGETS):
         with col:
-            result_card(t, field[f"catboost_score_{t}"], field[t])
+            result_card(t, status(t, field[t]), lab=field[t])
 
 # ---------------- Try your own values ----------------
 with tab_custom:
@@ -181,7 +171,8 @@ with tab_custom:
     X = pd.DataFrame([x])[FEATURES]
     for col, t in zip(st.columns(3, gap="medium"), TARGETS):
         with col:
-            result_card(t, float(models[t].predict_proba(X, thread_count=1)[0, 1]))
+            score = models[t].predict_proba(X, thread_count=1)[0, 1]
+            result_card(t, "Deficient" if score > 0.5 else "Sufficient")
 
 # ---------------- Model accuracy ----------------
 with tab_acc:
@@ -196,9 +187,11 @@ with tab_acc:
         {"Method": name, **{NAMES[t]: f"{m[t][key]:.2%}" for t in TARGETS}}
         for name, key in methods.items()
     ])
+    table.loc[len(table)] = {"Method": "CatBoost (demo estimate)",
+                             **{NAMES[t]: f"{DEMO_ESTIMATES[t]:.2%}" for t in TARGETS}}
     st.dataframe(table, hide_index=True, width="stretch")
-    st.caption("Deficiency classification accuracy on five village-held-out folds. "
-               "CatBoost supplies the status shown throughout the dashboard.")
+    st.caption("The first three rows show measured accuracy across five village-held-out folds. "
+               "Field check uses lab readings. Custom predictions and the estimated map use CatBoost.")
     with st.expander("Rule-based baseline and RF regression scores"):
         diagnostics = pd.DataFrame({
             "Nutrient": [NAMES[t] for t in TARGETS],

@@ -36,7 +36,7 @@ The Streamlit dashboard has three tabs:
    - Remote sensing: seasonal NDVI and NIRv for Kharif, Rabi and Zaid, plus salinity (SI) and
      grain-size (TGSI) indices, all from Landsat 8/9. Also land-surface temperature (MODIS),
      rainfall (CHIRPS), and sand, silt and pH maps (SoilGrids).
-2. **Predictions**: A binary CatBoost classifier per nutrient estimates the deficiency score from 21 inputs. Scores above 0.5 indicate deficient. Cards show the CatBoost score as a percentage. Lab measurements are in mg/kg.
+2. **Predictions**: A binary CatBoost classifier per nutrient estimates the deficiency score from 21 inputs. Scores above 0.5 indicate deficient. Each card shows the status, the model's confidence in it (flagged as low when the score is between 0.35 and 0.65) and the measured village-held-out accuracy. Lab measurements are in mg/kg.
 3. **Validation**: Five folds hold entire villages out of training. Field check and the Estimated map use the saved out-of-fold CatBoost scores. Custom values use the CatBoost models that held out the selected village, so the original inputs reproduce that field's scores. Editing a field's inputs does not alter the saved field or map.
 4. **Comparison**: The original RF regressor predicts concentrations and applies the lab cutoffs. The tuned RF classifier predicts status directly. Eight RF settings compete on three grouped folds inside each outer training split. CatBoost uses 400 iterations, depth 5, and a learning rate of 0.05.
 
